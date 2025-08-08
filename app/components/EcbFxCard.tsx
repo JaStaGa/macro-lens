@@ -4,24 +4,31 @@ import { useEffect, useMemo, useState } from 'react';
 
 type Obs = { date: string; value: number };
 
-function parseSdmxToSeries(json: any): Obs[] {
-    // SDMX-JSON shape (ECB): dataSets[0].series['0:...'].observations
-    const ds = json?.dataSets?.[0];
-    const series = ds?.series;
-    if (!series) return [];
+// Minimal SDMX types (enough for our use)
+type SdmxSeries = { observations?: Record<string, number[] | number> };
+type SdmxDataSet = { series?: Record<string, SdmxSeries> };
+type SdmxTimeValue = { id?: string; name?: string };
+type SdmxObservationDim = { id?: string; values?: SdmxTimeValue[] };
+type SdmxStructure = { dimensions?: { observation?: SdmxObservationDim[] } };
+type SdmxJson = { dataSets?: SdmxDataSet[]; structure?: SdmxStructure };
 
-    const firstSeriesKey = Object.keys(series)[0];
-    const observations = series?.[firstSeriesKey]?.observations;
+function parseSdmxToSeries(json: unknown): Obs[] {
+    const j = json as SdmxJson | undefined;
+    const ds = j?.dataSets?.[0];
+    const seriesMap = ds?.series;
+    if (!seriesMap) return [];
+
+    const firstKey = Object.keys(seriesMap)[0];
+    const observations = seriesMap[firstKey]?.observations;
     if (!observations) return [];
 
-    // Time labels live in structure.dimensions.observation (TIME_PERIOD usually first)
-    const obsDims = json?.structure?.dimensions?.observation ?? [];
+    const obsDims = j?.structure?.dimensions?.observation ?? [];
     const timeDim =
-        obsDims.find((d: any) => d?.id === 'TIME_PERIOD') ?? obsDims[0] ?? { values: [] };
-    const timeValues: Array<{ id?: string; name?: string }> = timeDim.values ?? [];
+        obsDims.find((d) => d?.id === 'TIME_PERIOD') ?? obsDims[0] ?? { values: [] };
+    const timeValues = timeDim.values ?? [];
 
     const out: Obs[] = [];
-    for (const [idxStr, arr] of Object.entries<any>(observations)) {
+    for (const [idxStr, arr] of Object.entries(observations as Record<string, number[] | number>)) {
         const i = Number(idxStr);
         const label = timeValues[i]?.id || timeValues[i]?.name; // e.g., "2025-07-18" or "2025-07"
         const v = Array.isArray(arr) ? arr[0] : arr;
@@ -30,7 +37,6 @@ function parseSdmxToSeries(json: any): Obs[] {
             out.push({ date: label, value: num });
         }
     }
-    // Sort by date ascending just in case
     return out.sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
@@ -68,17 +74,19 @@ export default function EcbFxCard() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Daily USD per EUR spot (ECB), last 30 obs
         const url = `/api/ecb?flowRef=EXR&key=D.USD.EUR.SP00.A&lastNObservations=30`;
         fetch(url)
             .then(async (r) => {
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                const j = await r.json();
+                const j: unknown = await r.json();
                 const parsed = parseSdmxToSeries(j);
                 if (!parsed.length) throw new Error('No observations found');
                 setSeries(parsed);
             })
-            .catch((e) => setErr(String(e)))
+            .catch((e: unknown) => {
+                const msg = e instanceof Error ? e.message : String(e);
+                setErr(msg);
+            })
             .finally(() => setLoading(false));
     }, []);
 
@@ -97,9 +105,7 @@ export default function EcbFxCard() {
             {!loading && !err && latest && (
                 <>
                     <div className="flex items-baseline gap-2">
-                        <span className="text-2xl font-bold">
-                            {latest.value.toFixed(4)}
-                        </span>
+                        <span className="text-2xl font-bold">{latest.value.toFixed(4)}</span>
                         {change !== null && (
                             <span
                                 className={`text-sm ${change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-gray-500'
@@ -110,10 +116,7 @@ export default function EcbFxCard() {
                             </span>
                         )}
                     </div>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">
-                        As of {latest.date}
-                    </p>
-
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">As of {latest.date}</p>
                     <div className="h-10">
                         <Sparkline points={series!.slice(-30).map((d) => d.value)} />
                     </div>
