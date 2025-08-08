@@ -1,4 +1,5 @@
 import CpiCard from "./components/CpiCard";
+import UnemploymentCard from "./components/UnemploymentCard";
 
 export default function Home() {
   return (
@@ -9,6 +10,7 @@ export default function Home() {
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <CpiCard />
+        <UnemploymentCard />
       </div>
     </main>
   );
