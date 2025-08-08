@@ -1,56 +1,48 @@
 import { NextResponse } from "next/server";
+import type { BlsResponse, BlsDatum } from "@/types/bls";
 
 export const revalidate = 3600; // 1 hour
 
 type Point = { date: string; value: number };
+const DEFAULT_SERIES = "LNS14000000"; // U-3 unemployment rate, SA
 
-// BLS series: Unemployment Rate (U-3, seasonally adjusted)
-const DEFAULT_SERIES = "LNS14000000"; // Labor Force Statistics, Unemployment Rate
+type BlsBody = {
+    seriesid: string[];
+    registrationkey?: string;
+};
 
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const series = searchParams.get("series") || DEFAULT_SERIES;
-    const limitParam = Number(searchParams.get("limit") || "120"); // ~10 years monthly
+    const limitParam = Number(searchParams.get("limit") || "120");
 
-    // BLS v2 timeseries endpoint supports POST with JSON body
-    const url = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
-    const body: any = {
-        seriesid: [series],
-        // You can also use startyear/endyear; we'll just trim locally
-        // 'registrationkey' is optional—only include if present
-    };
-    if (process.env.BLS_API_KEY) {
-        (body as any).registrationkey = process.env.BLS_API_KEY;
-    }
+    const body: BlsBody = { seriesid: [series] };
+    if (process.env.BLS_API_KEY) body.registrationkey = process.env.BLS_API_KEY;
 
-    const res = await fetch(url, {
+    const res = await fetch("https://api.bls.gov/publicAPI/v2/timeseries/data/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // ISR cache hint
-        next: { revalidate },
         body: JSON.stringify(body),
+        next: { revalidate },
     });
 
     if (!res.ok) {
         return NextResponse.json({ error: `BLS error: ${res.status}` }, { status: 502 });
     }
 
-    const raw = await res.json();
-    // Expect shape: { Results: { series: [{ data: [{ year, period, periodName, value, ... }] }] } }
+    const raw: BlsResponse = await res.json();
     const seriesArr = raw?.Results?.series?.[0]?.data ?? [];
-    // Convert to {date,value} with YYYY-MM-01 (BLS monthly uses periods "M01".."M12")
+
     const all: Point[] = seriesArr
-        .map((d: any) => {
+        .map<Point | null>((d: BlsDatum) => {
             const m = (d.period || "").replace("M", "");
             if (!/^\d{2}$/.test(m)) return null;
-            const month = m.padStart(2, "0");
-            const date = `${d.year}-${month}-01`;
+            const date = `${d.year}-${m.padStart(2, "0")}-01`;
             const value = Number(d.value);
             return Number.isFinite(value) ? { date, value } : null;
         })
-        .filter((p: Point | null): p is Point => p !== null)
-        // BLS returns newest first; flip to ascending
-        .reverse();
+        .filter((p): p is Point => p !== null)
+        .reverse(); // BLS returns newest first → make ascending
 
     const limit = Math.max(1, Math.min(limitParam, all.length));
     const observations = all.slice(-limit);
