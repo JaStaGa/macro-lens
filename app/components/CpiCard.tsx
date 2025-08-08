@@ -12,8 +12,8 @@ type FredResp = {
 function calcYoY(points: Point[]) {
     if (points.length < 13) return null;
     const last = points[points.length - 1]!.value;
-    const prev12 = points[points.length - 13]!.value; // 12 months earlier
-    return ((last / prev12 - 1) * 100);
+    const prev12 = points[points.length - 13]!.value;
+    return (last / prev12 - 1) * 100;
 }
 
 export default function CpiCard() {
@@ -28,10 +28,9 @@ export default function CpiCard() {
                 if (!res.ok) throw new Error("Failed to fetch CPI");
                 const json: FredResp = await res.json();
                 setData(json);
-                const y = calcYoY(json.observations);
-                setYoy(y);
-            } catch (e: any) {
-                setErr(e.message || "Error");
+                setYoy(calcYoY(json.observations));
+            } catch (e: unknown) {
+                setErr(e instanceof Error ? e.message : "Unknown error");
             }
         })();
     }, []);
@@ -45,9 +44,7 @@ export default function CpiCard() {
     return (
         <div className="p-4 rounded-xl border flex flex-col gap-1 bg-white dark:bg-zinc-900">
             <div className="text-xs uppercase text-gray-500">Headline CPI (YoY)</div>
-            <div className="text-3xl font-semibold">
-                {yoyText}
-            </div>
+            <div className="text-3xl font-semibold">{yoyText}</div>
             <div className="text-xs text-gray-500">
                 Level (index): {latest?.value?.toFixed(1)} • As of {latest?.date}
             </div>
