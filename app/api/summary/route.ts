@@ -12,12 +12,15 @@ type EcbSdmx = {
     structure: { dimensions: { observation: Array<{ values: Array<{ name: string }> }> } }
 }
 
-let _summarizer: any | null = null
-async function getSummarizer() {
-    if (_summarizer) return _summarizer
-    const { pipeline } = await import('@xenova/transformers')
-    _summarizer = await pipeline('text2text-generation', 'Xenova/t5-small');
-    return _summarizer
+type T2TOutput = Array<{ generated_text?: string }>;
+type SummarizerFn = (input: string, options?: Record<string, unknown>) => Promise<T2TOutput>;
+
+let _summarizer: SummarizerFn | null = null;
+async function getSummarizer(): Promise<SummarizerFn> {
+    if (_summarizer) return _summarizer;
+    const { pipeline } = await import('@xenova/transformers');
+    _summarizer = await pipeline('text2text-generation', 'Xenova/t5-small') as SummarizerFn;
+    return _summarizer;
 }
 
 function baseUrlFromEnv(headers: Headers) {
@@ -57,10 +60,10 @@ function yoyFromMonthly(observations: Point[]): { yoy: number | undefined; idx: 
     return { yoy: ((a / b) - 1) * 100, idx: i }
 }
 function nBack<T>(arr: T[], n: number): { cur?: T; prev?: T; i: number; j: number } {
-    if (!arr.length) return { i: -1, j: -1 }
-    const i = arr.length - 1
-    const j = Math.max(0, i - n)
-    return { cur: (arr as any)[i], prev: (arr as any)[j], i, j }
+    if (!arr.length) return { i: -1, j: -1 };
+    const i = arr.length - 1;
+    const j = Math.max(0, i - n);
+    return { cur: arr[i], prev: arr[j], i, j };
 }
 function parseEcbEurUsd(sdmx: EcbSdmx): { value?: number; prev?: number; date?: string; prevDate?: string } {
     try {
@@ -184,8 +187,8 @@ export async function GET(req: Request) {
         // Try to have the model compress the fact line into one clean sentence.
         try {
             const summarizer = await getSummarizer()
-            const out = await summarizer('summarize: ' + factLine, { max_new_tokens: 60, min_length: 20 })
-            const text = Array.isArray(out) ? out[0]?.summary_text : out?.summary_text
+            const out = await summarizer('summarize: ' + factLine, { max_new_tokens: 60, min_length: 20 });
+            const text = Array.isArray(out) ? out[0]?.generated_text : undefined;
             const factSentence = (typeof text === 'string' ? text : '').replace(/\s+/g, ' ').trim()
             // Guardrails: ensure it's one sentence ending with punctuation
             const one = factSentence.split(/(?<=[.!?])\s+/)[0]?.trim()
@@ -223,10 +226,11 @@ export async function GET(req: Request) {
                 },
             },
         )
-    } catch (err: any) {
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         return NextResponse.json(
-            { error: 'Failed to build summary', details: err?.message ?? String(err) },
+            { error: 'Failed to build summary', details: msg },
             { status: 500 },
-        )
+        );
     }
 }

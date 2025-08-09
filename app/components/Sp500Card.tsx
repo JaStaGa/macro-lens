@@ -8,7 +8,7 @@ function fmtDay(dateISO?: string) {
 function nBack<T>(arr: T[], n: number) {
     const i = arr.length - 1;
     const j = Math.max(0, i - n);
-    return { cur: (arr as any)[i], prev: (arr as any)[j] };
+    return { cur: arr[i], prev: arr[j] };
 }
 
 export default async function Sp500Card() {
