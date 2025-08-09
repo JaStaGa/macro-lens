@@ -4,6 +4,8 @@ import CpiCard from "./components/CpiCard";
 import UnemploymentCard from "./components/UnemploymentCard";
 import EcbFxCard from "./components/EcbFxCard";
 import SummaryCard from "./components/SummaryCard";
+import Yield10yCard from "./components/Yield10yCard";
+import Sp500Card from "./components/Sp500Card";
 
 export default function Home() {
   return (
@@ -16,6 +18,8 @@ export default function Home() {
         <CpiCard />
         <UnemploymentCard />
         <EcbFxCard />
+        <Yield10yCard />
+        <Sp500Card />
       </div>
       <SummaryCard />
     </main>

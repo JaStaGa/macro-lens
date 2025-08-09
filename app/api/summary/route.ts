@@ -16,7 +16,7 @@ let _summarizer: any | null = null
 async function getSummarizer() {
     if (_summarizer) return _summarizer
     const { pipeline } = await import('@xenova/transformers')
-    _summarizer = await pipeline('summarization', 'Xenova/distilbart-cnn-6-6')
+    _summarizer = await pipeline('text2text-generation', 'Xenova/t5-small');
     return _summarizer
 }
 
@@ -184,7 +184,7 @@ export async function GET(req: Request) {
         // Try to have the model compress the fact line into one clean sentence.
         try {
             const summarizer = await getSummarizer()
-            const out = await summarizer(factLine, { max_new_tokens: 60, min_length: 20 })
+            const out = await summarizer('summarize: ' + factLine, { max_new_tokens: 60, min_length: 20 })
             const text = Array.isArray(out) ? out[0]?.summary_text : out?.summary_text
             const factSentence = (typeof text === 'string' ? text : '').replace(/\s+/g, ' ').trim()
             // Guardrails: ensure it's one sentence ending with punctuation
