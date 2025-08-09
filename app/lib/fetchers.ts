@@ -20,53 +20,24 @@ export type Obs = { date: string; value: number };
 
 // ---------- Helpers ----------
 async function isBuildTime() {
-  // In prerender/build, next/headers is not available to read the live request
-  try {
-    await headers();
-    return false; // inside a real request (runtime)
-  } catch {
-    return true;  // build/prerender context
-  }
+    // If we cannot access request headers, we’re in prerender/build
+    try {
+        await headers();
+        return false;
+    } catch {
+        return true;
+    }
 }
 
 async function safeJson<T>(res: Response): Promise<T | null> {
     try { return (await res.json()) as T; } catch { return null; }
 }
 
-async function origin() {
-    // 1) Best: derive from the live request (works in RSC/functions)
-    try {
-        const h = await headers(); // async in Next 15
-        const proto = h.get('x-forwarded-proto') || 'https';
-        const host = h.get('host');
-        if (host) return `${proto}://${host}`.replace(/\/$/, '');
-    } catch {
-        // Not in a request (e.g., during `next build`) — fall through
-    }
-
-    // 2) Explicit base if set
-    const base = process.env.NEXT_PUBLIC_BASE_URL;
-    if (base) return base.replace(/\/$/, '');
-
-    // 3) Vercel fallback (may point to preview during build)
-    const vercel = process.env.VERCEL_URL;
-    if (vercel) return `https://${vercel}`;
-
-    // 4) Local dev
-    const port = process.env.PORT || '3000';
-    return `http://localhost:${port}`;
-}
-
-async function makeUrl(path: string) {
-    // Supports both '/api/...' and full URLs; ensures absolute
-    const base = await origin();
-    return new URL(path, base).toString();
-}
-
 // ---------- Public fetchers ----------
+// NOTE: Use RELATIVE paths so Next routes internally (avoids preview protection 401s)
+
 export async function getCPI() {
-    const url = await makeUrl('/api/fred?series=CPIAUCSL&limit=240');
-    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
+    const res = await fetch('/api/fred?series=CPIAUCSL&limit=240', { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
         if (await isBuildTime()) {
@@ -86,8 +57,7 @@ export async function getCPI() {
 }
 
 export async function getUnemployment() {
-    const url = await makeUrl('/api/bls?series=LNS14000000&limit=200');
-    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
+    const res = await fetch('/api/bls?series=LNS14000000&limit=200', { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
         if (await isBuildTime()) {
@@ -107,8 +77,9 @@ export async function getUnemployment() {
 }
 
 export async function getEurUsdLastN(n = 30) {
-    const url = await makeUrl(`/api/ecb?flowRef=EXR&key=D.USD.EUR.SP00.A&lastNObservations=${n}`);
-    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
+    const res = await fetch(`/api/ecb?flowRef=EXR&key=D.USD.EUR.SP00.A&lastNObservations=${n}`, {
+        next: { revalidate: REVALIDATE },
+    });
 
     if (!res.ok) {
         if (await isBuildTime()) return [] as Obs[];
@@ -129,8 +100,9 @@ export async function getFredSeriesWindow(series: string, limit = 90, startDaysB
     start.setDate(start.getDate() - startDaysBack);
     const startStr = start.toISOString().slice(0, 10);
 
-    const url = await makeUrl(`/api/fred?series=${encodeURIComponent(series)}&limit=${limit}&start=${startStr}`);
-    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
+    const res = await fetch(`/api/fred?series=${encodeURIComponent(series)}&limit=${limit}&start=${startStr}`, {
+        next: { revalidate: REVALIDATE },
+    });
 
     if (!res.ok) {
         if (await isBuildTime()) {
