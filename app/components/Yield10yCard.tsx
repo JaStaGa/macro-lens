@@ -14,6 +14,14 @@ function nBack<T>(arr: T[], n: number) {
 export default async function Yield10yCard() {
     const dgs10 = await getDGS10Window(90, 180);
     const obs = dgs10.observations ?? [];
+    if (obs.length === 0) {
+        return (
+            <div className="p-4 rounded-xl border bg-white dark:bg-zinc-900">
+                <div className="text-xs uppercase text-gray-500">US 10‑Year Treasury</div>
+                <div className="text-sm text-gray-500">Data unavailable</div>
+            </div>
+        );
+    }
     const { cur, prev } = nBack(obs, 21);
     const yld = cur?.value as number | undefined;
     const chgBps = (cur?.value != null && prev?.value != null)

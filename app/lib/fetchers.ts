@@ -17,7 +17,20 @@ export type SdmxJson = {
 };
 export type Obs = { date: string; value: number };
 
-// ---------- URL helpers (ALWAYS absolute for Node/RSC) ----------
+// ---------- Helpers ----------
+function isProdBuild() {
+    // Next sets this during `next build`
+    return process.env.NEXT_PHASE === 'phase-production-build';
+}
+
+async function safeJson<T>(res: Response): Promise<T | null> {
+    try {
+        return (await res.json()) as T;
+    } catch {
+        return null;
+    }
+}
+
 function origin() {
     // Prefer explicit base (set in .env.local and Vercel)
     const base = process.env.NEXT_PUBLIC_BASE_URL;
@@ -64,17 +77,33 @@ export async function getEurUsdLastN(n = 30) {
     return parseSdmxToSeries(j);
 }
 
-// Optional convenience helpers for other FRED series (used by Yield/SPX cards)
 export async function getFredSeriesWindow(series: string, limit = 90, startDaysBack = 180) {
     const start = new Date();
     start.setDate(start.getDate() - startDaysBack);
     const startStr = start.toISOString().slice(0, 10);
-    const r = await fetch(
+
+    const res = await fetch(
         makeUrl(`/api/fred?series=${encodeURIComponent(series)}&limit=${limit}&start=${startStr}`),
         { next: { revalidate: REVALIDATE } }
     );
-    if (!r.ok) throw new Error(`FRED ${series} fetch failed: ${r.status}`);
-    return r.json() as Promise<FredOut>;
+
+    if (!res.ok) {
+        // During `next build`, do NOT throw — return an empty dataset so the page prerenders.
+        if (isProdBuild()) {
+            return { series, observations: [] as Point[], units: undefined, frequency: undefined } as FredOut;
+        }
+        throw new Error(`FRED ${series} fetch failed: ${res.status}`);
+    }
+
+    const data = await safeJson<FredOut>(res);
+    if (!data || !Array.isArray(data.observations)) {
+        if (isProdBuild()) {
+            return { series, observations: [] as Point[], units: undefined, frequency: undefined } as FredOut;
+        }
+        throw new Error(`FRED ${series} bad payload`);
+    }
+
+    return data;
 }
 
 export async function getDGS10Window(limit = 90, startDaysBack = 180) {

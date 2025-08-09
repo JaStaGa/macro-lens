@@ -14,6 +14,14 @@ function nBack<T>(arr: T[], n: number) {
 export default async function Sp500Card() {
     const spx = await getSP500Window(90, 180);
     const obs = spx.observations ?? [];
+    if (obs.length === 0) {
+        return (
+            <div className="p-4 rounded-xl border bg-white dark:bg-zinc-900">
+                <div className="text-xs uppercase text-gray-500">S&amp;P 500</div>
+                <div className="text-sm text-gray-500">Data unavailable</div>
+            </div>
+        );
+    }
     const { cur, prev } = nBack(obs, 21);
     const v = cur?.value as number | undefined;
     const pct = (cur?.value != null && prev?.value != null && prev.value !== 0)
