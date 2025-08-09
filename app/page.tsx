@@ -1,6 +1,9 @@
+export const revalidate = 3600; // revalidate the page every hour
+
 import CpiCard from "./components/CpiCard";
 import UnemploymentCard from "./components/UnemploymentCard";
 import EcbFxCard from "./components/EcbFxCard";
+import SummaryCard from "./components/SummaryCard";
 
 export default function Home() {
   return (
@@ -14,6 +17,7 @@ export default function Home() {
         <UnemploymentCard />
         <EcbFxCard />
       </div>
+      <SummaryCard />
     </main>
   );
 }
