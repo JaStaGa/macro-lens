@@ -1,6 +1,16 @@
 // app/api/summary/route.ts
 import { NextResponse } from 'next/server'
 
+const ENABLE_LOCAL_SUMMARY = process.env.ENABLE_LOCAL_SUMMARY === '1';
+const MODEL_TIMEOUT_MS = Number(process.env.SUMMARY_MODEL_TIMEOUT_MS || '1500');
+
+function withTimeout<T>(p: Promise<T>, ms: number, label = 'timeout'): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error(label)), ms);
+        p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+    });
+}
+
 export const runtime = 'nodejs'
 export const revalidate = 3600
 
@@ -185,25 +195,36 @@ export async function GET(req: Request) {
         let source: 'model+deterministic' | 'deterministic' = 'deterministic'
 
         // Try to have the model compress the fact line into one clean sentence.
-        try {
-            const summarizer = await getSummarizer()
-            const out = await summarizer('summarize: ' + factLine, { max_new_tokens: 60, min_length: 20 });
-            const text = Array.isArray(out) ? out[0]?.generated_text : undefined;
-            const factSentence = (typeof text === 'string' ? text : '').replace(/\s+/g, ' ').trim()
-            // Guardrails: ensure it's one sentence ending with punctuation
-            const one = factSentence.split(/(?<=[.!?])\s+/)[0]?.trim()
-            const finalFact = one ? (/[.!?]$/.test(one) ? one : one + '.') : ''
-            if (finalFact && finalFact.length > 30) {
-                summary = `${finalFact} ${analysisSentence}`.trim()
-                source = 'model+deterministic'
-            } else {
-                summary = fallback
-                source = 'deterministic'
+        // Try ML only if explicitly enabled; keep a strict timeout so the route never times out.
+        if (ENABLE_LOCAL_SUMMARY) {
+            try {
+                const summarizer = await withTimeout(getSummarizer(), MODEL_TIMEOUT_MS, 'model-init-timeout');
+                const out = await withTimeout(
+                    summarizer('summarize: ' + factLine, { max_new_tokens: 60, min_length: 20 }),
+                    MODEL_TIMEOUT_MS,
+                    'model-run-timeout'
+                );
+
+                const text = Array.isArray(out) ? out[0]?.generated_text : undefined;
+                const factSentence = (typeof text === 'string' ? text : '').replace(/\s+/g, ' ').trim();
+                const one = factSentence.split(/(?<=[.!?])\s+/)[0]?.trim();
+                const finalFact = one ? (/[.!?]$/.test(one) ? one : one + '.') : '';
+                if (finalFact && finalFact.length > 30) {
+                    summary = `${finalFact} ${analysisSentence}`.trim();
+                    source = 'model+deterministic';
+                } else {
+                    summary = fallback;
+                    source = 'deterministic';
+                }
+            } catch {
+                // Any model issue: fall back without failing the route
+                summary = fallback;
+                source = 'deterministic';
             }
-        } catch {
-            // Model not available or failed — use deterministic text
-            summary = fallback
-            source = 'deterministic'
+        } else {
+            // Disabled in prod: just keep deterministic summary
+            summary = `${factLine} ${analysisSentence}`.trim();
+            source = 'deterministic';
         }
 
         return new NextResponse(
