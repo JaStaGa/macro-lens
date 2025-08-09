@@ -52,19 +52,47 @@ function makeUrl(path: string) {
 
 // ---------- Public fetchers ----------
 export async function getCPI() {
-    const r = await fetch(makeUrl('/api/fred?series=CPIAUCSL&limit=240'), {
+    const res = await fetch(makeUrl('/api/fred?series=CPIAUCSL&limit=240'), {
         next: { revalidate: REVALIDATE },
     });
-    if (!r.ok) throw new Error(`CPI fetch failed: ${r.status}`);
-    return r.json() as Promise<FredOut>;
+
+    if (!res.ok) {
+        if (isProdBuild()) {
+            return { series: 'CPIAUCSL', observations: [], units: undefined, frequency: undefined } as FredOut;
+        }
+        throw new Error(`CPI fetch failed: ${res.status}`);
+    }
+
+    const data = await safeJson<FredOut>(res);
+    if (!data || !Array.isArray(data.observations)) {
+        if (isProdBuild()) {
+            return { series: 'CPIAUCSL', observations: [], units: undefined, frequency: undefined } as FredOut;
+        }
+        throw new Error('CPI bad payload');
+    }
+    return data;
 }
 
 export async function getUnemployment() {
-    const r = await fetch(makeUrl('/api/bls?series=LNS14000000&limit=200'), {
+    const res = await fetch(makeUrl('/api/bls?series=LNS14000000&limit=200'), {
         next: { revalidate: REVALIDATE },
     });
-    if (!r.ok) throw new Error(`BLS fetch failed: ${r.status}`);
-    return r.json() as Promise<BlsOut>;
+
+    if (!res.ok) {
+        if (isProdBuild()) {
+            return { series: 'LNS14000000', observations: [], units: 'percent', frequency: 'Monthly' } as BlsOut;
+        }
+        throw new Error(`BLS fetch failed: ${res.status}`);
+    }
+
+    const data = await safeJson<BlsOut>(res);
+    if (!data || !Array.isArray(data.observations)) {
+        if (isProdBuild()) {
+            return { series: 'LNS14000000', observations: [], units: 'percent', frequency: 'Monthly' } as BlsOut;
+        }
+        throw new Error('BLS bad payload');
+    }
+    return data;
 }
 
 export async function getEurUsdLastN(n = 30) {
