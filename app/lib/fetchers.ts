@@ -1,6 +1,7 @@
 // app/lib/fetchers.ts
-// Centralized server fetch helpers for RSC (server components)
+import { headers } from 'next/headers';
 
+// Centralized server fetch helpers for RSC (server components)
 export const REVALIDATE = 3600; // seconds
 
 // ---------- Types ----------
@@ -19,42 +20,50 @@ export type Obs = { date: string; value: number };
 
 // ---------- Helpers ----------
 function isProdBuild() {
-    // Next sets this during `next build`
-    return process.env.NEXT_PHASE === 'phase-production-build';
+    // True only during `next build` worker, not in runtime lambdas
+    const phase = process.env.NEXT_PHASE;
+    const runtime = process.env.NEXT_RUNTIME;
+    return phase === 'phase-production-build' && !runtime;
 }
 
 async function safeJson<T>(res: Response): Promise<T | null> {
-    try {
-        return (await res.json()) as T;
-    } catch {
-        return null;
-    }
+    try { return (await res.json()) as T; } catch { return null; }
 }
 
-function origin() {
-    // Prefer explicit base (set in .env.local and Vercel)
+async function origin() {
+    // 1) Best: derive from the live request (works in RSC/functions)
+    try {
+        const h = await headers(); // async in Next 15
+        const proto = h.get('x-forwarded-proto') || 'https';
+        const host = h.get('host');
+        if (host) return `${proto}://${host}`.replace(/\/$/, '');
+    } catch {
+        // Not in a request (e.g., during `next build`) — fall through
+    }
+
+    // 2) Explicit base if set
     const base = process.env.NEXT_PUBLIC_BASE_URL;
     if (base) return base.replace(/\/$/, '');
 
-    // Fallback: Vercel env (no protocol)
+    // 3) Vercel fallback (may point to preview during build)
     const vercel = process.env.VERCEL_URL;
     if (vercel) return `https://${vercel}`;
 
-    // Local dev default
+    // 4) Local dev
     const port = process.env.PORT || '3000';
     return `http://localhost:${port}`;
 }
 
-function makeUrl(path: string) {
+async function makeUrl(path: string) {
     // Supports both '/api/...' and full URLs; ensures absolute
-    return new URL(path, origin()).toString();
+    const base = await origin();
+    return new URL(path, base).toString();
 }
 
 // ---------- Public fetchers ----------
 export async function getCPI() {
-    const res = await fetch(makeUrl('/api/fred?series=CPIAUCSL&limit=240'), {
-        next: { revalidate: REVALIDATE },
-    });
+    const url = await makeUrl('/api/fred?series=CPIAUCSL&limit=240');
+    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
         if (isProdBuild()) {
@@ -74,9 +83,8 @@ export async function getCPI() {
 }
 
 export async function getUnemployment() {
-    const res = await fetch(makeUrl('/api/bls?series=LNS14000000&limit=200'), {
-        next: { revalidate: REVALIDATE },
-    });
+    const url = await makeUrl('/api/bls?series=LNS14000000&limit=200');
+    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
         if (isProdBuild()) {
@@ -96,13 +104,10 @@ export async function getUnemployment() {
 }
 
 export async function getEurUsdLastN(n = 30) {
-    const res = await fetch(
-        makeUrl(`/api/ecb?flowRef=EXR&key=D.USD.EUR.SP00.A&lastNObservations=${n}`),
-        { next: { revalidate: REVALIDATE } }
-    );
+    const url = await makeUrl(`/api/ecb?flowRef=EXR&key=D.USD.EUR.SP00.A&lastNObservations=${n}`);
+    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
-        // During build, don't throw — return empty so prerender succeeds.
         if (isProdBuild()) return [] as Obs[];
         throw new Error(`ECB fetch failed: ${res.status}`);
     }
@@ -121,13 +126,10 @@ export async function getFredSeriesWindow(series: string, limit = 90, startDaysB
     start.setDate(start.getDate() - startDaysBack);
     const startStr = start.toISOString().slice(0, 10);
 
-    const res = await fetch(
-        makeUrl(`/api/fred?series=${encodeURIComponent(series)}&limit=${limit}&start=${startStr}`),
-        { next: { revalidate: REVALIDATE } }
-    );
+    const url = await makeUrl(`/api/fred?series=${encodeURIComponent(series)}&limit=${limit}&start=${startStr}`);
+    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
-        // During `next build`, do NOT throw — return an empty dataset so the page prerenders.
         if (isProdBuild()) {
             return { series, observations: [] as Point[], units: undefined, frequency: undefined } as FredOut;
         }
