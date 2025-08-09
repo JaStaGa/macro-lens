@@ -20,13 +20,32 @@ export type Obs = { date: string; value: number };
 
 // ---------- Helpers ----------
 async function isBuildTime() {
-    // If we cannot access request headers, we’re in prerender/build
     try {
-        await headers();
+        // headers() throws during build/prerender (no request context)
+        await (await import('next/headers')).headers();
         return false;
     } catch {
         return true;
     }
+}
+
+// Absolute base for build
+function buildBase() {
+    const explicit = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, '');
+    if (explicit) return explicit;
+    const vercel = process.env.VERCEL_URL; // e.g. abc123.vercel.app
+    if (vercel) return `https://${vercel}`;
+    const port = process.env.PORT || '3000';
+    return `http://localhost:${port}`;
+}
+
+// Compose the right URL for this phase
+async function routeUrl(path: string) {
+    if (await isBuildTime()) {
+        return `${buildBase()}${path.startsWith('/') ? path : `/${path}`}`;
+    }
+    // runtime: use relative so Next routes internally
+    return path.startsWith('/') ? path : `/${path}`;
 }
 
 async function safeJson<T>(res: Response): Promise<T | null> {
@@ -34,10 +53,10 @@ async function safeJson<T>(res: Response): Promise<T | null> {
 }
 
 // ---------- Public fetchers ----------
-// NOTE: Use RELATIVE paths so Next routes internally (avoids preview protection 401s)
 
 export async function getCPI() {
-    const res = await fetch('/api/fred?series=CPIAUCSL&limit=240', { next: { revalidate: REVALIDATE } });
+    const url = await routeUrl('/api/fred?series=CPIAUCSL&limit=240');
+    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
         if (await isBuildTime()) {
@@ -57,7 +76,8 @@ export async function getCPI() {
 }
 
 export async function getUnemployment() {
-    const res = await fetch('/api/bls?series=LNS14000000&limit=200', { next: { revalidate: REVALIDATE } });
+    const url = await routeUrl('/api/bls?series=LNS14000000&limit=200');
+    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
         if (await isBuildTime()) {
@@ -77,9 +97,8 @@ export async function getUnemployment() {
 }
 
 export async function getEurUsdLastN(n = 30) {
-    const res = await fetch(`/api/ecb?flowRef=EXR&key=D.USD.EUR.SP00.A&lastNObservations=${n}`, {
-        next: { revalidate: REVALIDATE },
-    });
+    const url = await routeUrl(`/api/ecb?flowRef=EXR&key=D.USD.EUR.SP00.A&lastNObservations=${n}`);
+    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
         if (await isBuildTime()) return [] as Obs[];
@@ -100,9 +119,8 @@ export async function getFredSeriesWindow(series: string, limit = 90, startDaysB
     start.setDate(start.getDate() - startDaysBack);
     const startStr = start.toISOString().slice(0, 10);
 
-    const res = await fetch(`/api/fred?series=${encodeURIComponent(series)}&limit=${limit}&start=${startStr}`, {
-        next: { revalidate: REVALIDATE },
-    });
+    const url = await routeUrl(`/api/fred?series=${encodeURIComponent(series)}&limit=${limit}&start=${startStr}`);
+    const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
         if (await isBuildTime()) {
