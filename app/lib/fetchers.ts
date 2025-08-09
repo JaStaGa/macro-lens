@@ -19,11 +19,14 @@ export type SdmxJson = {
 export type Obs = { date: string; value: number };
 
 // ---------- Helpers ----------
-function isProdBuild() {
-    // True only during `next build` worker, not in runtime lambdas
-    const phase = process.env.NEXT_PHASE;
-    const runtime = process.env.NEXT_RUNTIME;
-    return phase === 'phase-production-build' && !runtime;
+async function isBuildTime() {
+  // In prerender/build, next/headers is not available to read the live request
+  try {
+    await headers();
+    return false; // inside a real request (runtime)
+  } catch {
+    return true;  // build/prerender context
+  }
 }
 
 async function safeJson<T>(res: Response): Promise<T | null> {
@@ -66,7 +69,7 @@ export async function getCPI() {
     const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
-        if (isProdBuild()) {
+        if (await isBuildTime()) {
             return { series: 'CPIAUCSL', observations: [], units: undefined, frequency: undefined } as FredOut;
         }
         throw new Error(`CPI fetch failed: ${res.status}`);
@@ -74,7 +77,7 @@ export async function getCPI() {
 
     const data = await safeJson<FredOut>(res);
     if (!data || !Array.isArray(data.observations)) {
-        if (isProdBuild()) {
+        if (await isBuildTime()) {
             return { series: 'CPIAUCSL', observations: [], units: undefined, frequency: undefined } as FredOut;
         }
         throw new Error('CPI bad payload');
@@ -87,7 +90,7 @@ export async function getUnemployment() {
     const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
-        if (isProdBuild()) {
+        if (await isBuildTime()) {
             return { series: 'LNS14000000', observations: [], units: 'percent', frequency: 'Monthly' } as BlsOut;
         }
         throw new Error(`BLS fetch failed: ${res.status}`);
@@ -95,7 +98,7 @@ export async function getUnemployment() {
 
     const data = await safeJson<BlsOut>(res);
     if (!data || !Array.isArray(data.observations)) {
-        if (isProdBuild()) {
+        if (await isBuildTime()) {
             return { series: 'LNS14000000', observations: [], units: 'percent', frequency: 'Monthly' } as BlsOut;
         }
         throw new Error('BLS bad payload');
@@ -108,13 +111,13 @@ export async function getEurUsdLastN(n = 30) {
     const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
-        if (isProdBuild()) return [] as Obs[];
+        if (await isBuildTime()) return [] as Obs[];
         throw new Error(`ECB fetch failed: ${res.status}`);
     }
 
     const j = await safeJson<SdmxJson>(res);
     if (!j) {
-        if (isProdBuild()) return [] as Obs[];
+        if (await isBuildTime()) return [] as Obs[];
         throw new Error('ECB bad payload');
     }
 
@@ -130,7 +133,7 @@ export async function getFredSeriesWindow(series: string, limit = 90, startDaysB
     const res = await fetch(url, { next: { revalidate: REVALIDATE } });
 
     if (!res.ok) {
-        if (isProdBuild()) {
+        if (await isBuildTime()) {
             return { series, observations: [] as Point[], units: undefined, frequency: undefined } as FredOut;
         }
         throw new Error(`FRED ${series} fetch failed: ${res.status}`);
@@ -138,7 +141,7 @@ export async function getFredSeriesWindow(series: string, limit = 90, startDaysB
 
     const data = await safeJson<FredOut>(res);
     if (!data || !Array.isArray(data.observations)) {
-        if (isProdBuild()) {
+        if (await isBuildTime()) {
             return { series, observations: [] as Point[], units: undefined, frequency: undefined } as FredOut;
         }
         throw new Error(`FRED ${series} bad payload`);
