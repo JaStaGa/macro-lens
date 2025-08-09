@@ -68,12 +68,23 @@ export async function getUnemployment() {
 }
 
 export async function getEurUsdLastN(n = 30) {
-    const r = await fetch(
+    const res = await fetch(
         makeUrl(`/api/ecb?flowRef=EXR&key=D.USD.EUR.SP00.A&lastNObservations=${n}`),
         { next: { revalidate: REVALIDATE } }
     );
-    if (!r.ok) throw new Error(`ECB fetch failed: ${r.status}`);
-    const j = (await r.json()) as SdmxJson;
+
+    if (!res.ok) {
+        // During build, don't throw — return empty so prerender succeeds.
+        if (isProdBuild()) return [] as Obs[];
+        throw new Error(`ECB fetch failed: ${res.status}`);
+    }
+
+    const j = await safeJson<SdmxJson>(res);
+    if (!j) {
+        if (isProdBuild()) return [] as Obs[];
+        throw new Error('ECB bad payload');
+    }
+
     return parseSdmxToSeries(j);
 }
 

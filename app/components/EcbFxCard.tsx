@@ -20,6 +20,17 @@ function Sparkline({ points }: { points: number[] }) {
 
 export default async function EcbFxCard() {
     const series = await getEurUsdLastN(30);
+
+    if (!series.length) {
+        return (
+            <div className="rounded-lg border p-4 bg-white dark:bg-zinc-900">
+                <h2 className="font-semibold mb-1">EUR/USD (ECB)</h2>
+                <p className="text-xs text-gray-500 mb-2">Daily spot, USD per EUR</p>
+                <p className="text-sm text-gray-500">Data unavailable</p>
+            </div>
+        );
+    }
+    
     const latest = series.at(-1);
     const prev = series.at(-2);
     const change = latest && prev ? latest.value - prev.value : null;
