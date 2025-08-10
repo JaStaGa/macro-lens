@@ -2,8 +2,30 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import type { MLCEngine } from '@mlc-ai/web-llm';
 
-type Msg = { role: 'user' | 'assistant' | 'system'; content: string };
+// Extend Navigator so we can feature‑detect WebGPU without `any`
+declare global {
+    interface Navigator {
+        gpu?: unknown;
+    }
+}
+
+// Messages the OpenAI‑compatible endpoint accepts (no tools in this app)
+type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+type ChatRequest = {
+    messages: ChatMessage[];
+    temperature?: number;
+    max_tokens?: number;
+};
+
+// Minimal shape we read back from the completion
+type ChatCompletionResult = {
+    choices?: Array<{ message?: { content?: string } }>;
+};
+
+// Local UI message (same shape as ChatMessage, kept separate for clarity)
+type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
 
 const ENABLED =
     process.env.NEXT_PUBLIC_ENABLE_WEBLLM === '1' ||
@@ -12,7 +34,10 @@ const ENABLED =
 export default function ChatDock({
     systemPrompt,
     dataContext,
-}: { systemPrompt: string; dataContext: string }) {
+}: {
+    systemPrompt: string;
+    dataContext: string;
+}) {
     const [open, setOpen] = useState(false);
     const [ready, setReady] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -20,56 +45,59 @@ export default function ChatDock({
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<Msg[]>([
         { role: 'system', content: systemPrompt },
-        { role: 'assistant', content: 'Hi! Ask me about the latest CPI, unemployment, 10‑year yields, S&P 500, or EUR/USD.' },
+        {
+            role: 'assistant',
+            content:
+                'Hi! Ask me about the latest CPI, unemployment, 10‑year yields, S&P 500, or EUR/USD.',
+        },
         { role: 'assistant', content: dataContext },
     ]);
 
-    const engineRef = useRef<any>(null);
+    const engineRef = useRef<MLCEngine | null>(null);
 
+    // Lazy‑load the on‑device model when the dock first opens
     useEffect(() => {
         let canceled = false;
+
         async function init() {
             if (!open || engineRef.current || !ENABLED) return;
 
-            if (!(navigator as any).gpu) {
-                setErr('This browser/device does not support WebGPU; falling back to basic answers.');
+            // Require WebGPU; if absent, we stay in basic (fallback) mode
+            if (!('gpu' in navigator)) {
+                setErr('This browser/device does not support WebGPU; using basic answers.');
                 setReady(true);
                 return;
             }
 
             try {
-                // ✅ correct module name
                 const webllm = await import('@mlc-ai/web-llm');
-
-                // Small model that loads reasonably fast on WebGPU
                 const modelId = 'Llama-3.2-1B-Instruct-q4f32_1-MLC';
 
-                // API per docs: CreateMLCEngine(modelId, options)
-                const engine = await webllm.CreateMLCEngine(modelId, {
-                    initProgressCallback: ({ progress }: { progress: number }) => {
-                        // optional: you could surface a tiny “loading … {progress}%”
-                        // console.log('WebLLM load:', Math.round(progress * 100), '%');
-                    },
-                });
+                // Keep options minimal to avoid “unused” warnings
+                const engine = await webllm.CreateMLCEngine(modelId);
 
                 if (canceled) return;
                 engineRef.current = engine;
                 setReady(true);
             } catch (e) {
+                // If model fails, fall back to basic mode
                 console.error(e);
-                setErr('Failed to load on-device model; using basic answers.');
+                setErr('Failed to load on‑device model; using basic answers.');
                 setReady(true);
             }
         }
 
         init();
-        return () => { canceled = true; };
+        return () => {
+            canceled = true;
+        };
     }, [open]);
 
     async function handleSend() {
         if (!input.trim()) return;
+
         const userMsg: Msg = { role: 'user', content: input.trim() };
-        setMessages(m => [...m, userMsg]);
+        setMessages((m) => [...m, userMsg]);
         setInput('');
 
         const fallbackReply = async (): Promise<string> => {
@@ -84,33 +112,37 @@ Ask a follow‑up if you want specifics.`;
 
         setBusy(true);
         try {
-            if (!ENABLED || !ready || !engineRef.current) {
+            const engine = engineRef.current;
+
+            if (!ENABLED || !ready || !engine) {
                 const text = await fallbackReply();
-                setMessages(m => [...m, { role: 'assistant', content: text }]);
+                setMessages((m) => [...m, { role: 'assistant', content: text }]);
                 return;
             }
 
-            const engine = engineRef.current;
-            const full = [
+            // Build a strictly typed message array for WebLLM
+            const full: ChatMessage[] = [
                 { role: 'system', content: systemPrompt },
                 { role: 'system', content: dataContext },
-                ...messages.filter(m => m.role !== 'system'),
-                userMsg,
+                ...messages
+                    .filter((m) => m.role !== 'system')
+                    .map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
+                { role: 'user', content: userMsg.content },
             ];
 
-            // WebLLM chat completion (non-stream; easy first)
-            const result = await engine.chat.completions.create({
+            const req: ChatRequest = {
                 messages: full,
                 temperature: 0.2,
                 max_tokens: 256,
-            });
+            };
 
-            const content = result?.choices?.[0]?.message?.content ?? '';
-            setMessages(m => [...m, { role: 'assistant', content: content || '…' }]);
+            const result = (await engine.chat.completions.create(req)) as ChatCompletionResult;
+            const content = result?.choices?.[0]?.message?.content?.trim() ?? '…';
+            setMessages((m) => [...m, { role: 'assistant', content }]);
         } catch (e) {
             console.error(e);
             const text = await fallbackReply();
-            setMessages(m => [...m, { role: 'assistant', content: text }]);
+            setMessages((m) => [...m, { role: 'assistant', content: text }]);
         } finally {
             setBusy(false);
         }
@@ -121,7 +153,7 @@ Ask a follow‑up if you want specifics.`;
     return (
         <>
             <button
-                onClick={() => setOpen(v => !v)}
+                onClick={() => setOpen((v) => !v)}
                 className="fixed bottom-4 right-4 rounded-full px-4 py-2 shadow-lg bg-zinc-900 text-white border border-zinc-700"
             >
                 {open ? 'Close chat' : 'Chat about the data'}
@@ -135,16 +167,20 @@ Ask a follow‑up if you want specifics.`;
                     </div>
 
                     <div className="flex-1 overflow-auto p-3 space-y-3">
-                        {messages.filter(m => m.role !== 'system').map((m, i) => (
-                            <div key={i} className={m.role === 'user' ? 'text-right' : ''}>
-                                <div className={
-                                    'inline-block rounded-xl px-3 py-2 text-sm ' +
-                                    (m.role === 'user' ? 'bg-zinc-800' : 'bg-zinc-100 text-zinc-900')
-                                }>
-                                    {m.content}
+                        {messages
+                            .filter((m) => m.role !== 'system')
+                            .map((m, i) => (
+                                <div key={i} className={m.role === 'user' ? 'text-right' : ''}>
+                                    <div
+                                        className={
+                                            'inline-block rounded-xl px-3 py-2 text-sm ' +
+                                            (m.role === 'user' ? 'bg-zinc-800' : 'bg-zinc-100 text-zinc-900')
+                                        }
+                                    >
+                                        {m.content}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
                     </div>
 
                     <div className="p-2 border-t border-zinc-800 flex gap-2">
@@ -153,7 +189,9 @@ Ask a follow‑up if you want specifics.`;
                             placeholder="Ask about CPI, unemployment, yields, SPX, EUR/USD…"
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') handleSend(); }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSend();
+                            }}
                             disabled={busy}
                         />
                         <button
