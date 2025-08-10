@@ -110,13 +110,24 @@ export default function ChatDock({
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState<string | null>(null);
     const [input, setInput] = useState('');
-    const [mode, setMode] = useState<'idle' | 'basic' | 'webllm' | 'webllm-error'>('idle'); // <— instrumentation
+    const [mode, setMode] = useState<'loading' | 'basic' | 'webllm' | 'webllm-error'>('loading');  // <— instrumentation
     const [messages, setMessages] = useState<Msg[]>([
         { role: 'system', content: systemPrompt },
-        { role: 'assistant', content: 'Hi! Ask me about CPI, unemployment, 10‑year yields, S&P 500, or EUR/USD.' },
     ]);
 
+    // When WebLLM finishes loading, send initial greeting
+    useEffect(() => {
+        if (mode === 'webllm' && !messages.some(m => m.role === 'assistant')) {
+            setMessages(m => [
+                ...m,
+                { role: 'assistant', content: 'Hi! Ask me about CPI, unemployment, 10-year yields, S&P 500, or EUR/USD.' }
+            ]);
+        }
+    }, [mode]);
+
+
     const engineRef = useRef<MLCEngine | null>(null);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // Lazy-load WebLLM when opened
     useEffect(() => {
@@ -137,7 +148,7 @@ export default function ChatDock({
 
                 // Try a very small, instruction-following model (often better behavior)
                 // You can swap back to 'Llama-3.2-1B-Instruct-q4f32_1-MLC' if you prefer.
-                const modelId = 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC';
+                const modelId = 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
 
                 console.log('[ChatDock] Loading model:', modelId);
                 const engine = await webllm.CreateMLCEngine(modelId, {
@@ -164,6 +175,13 @@ export default function ChatDock({
         init();
         return () => { canceled = true; };
     }, [open]);
+
+    // Auto-scroll to bottom when messages update
+    useEffect(() => {
+        if (messagesEndRef.current) {
+            messagesEndRef.current.scrollTop = messagesEndRef.current.scrollHeight;
+        }
+    }, [messages]);
 
     async function handleSend() {
         if (!input.trim()) return;
@@ -227,7 +245,7 @@ export default function ChatDock({
         <>
             <button
                 onClick={() => setOpen(v => !v)}
-                className="fixed bottom-4 right-4 rounded-full px-4 py-2 shadow-lg bg-zinc-900 text-white border border-zinc-700"
+                className="fixed top-4 right-4 rounded-full px-4 py-2 shadow-lg bg-zinc-900 text-white border border-zinc-700"
             >
                 {open ? 'Close chat' : 'Chat about the data'}
             </button>
@@ -241,16 +259,32 @@ export default function ChatDock({
                         </span>
                     </div>
 
-                    <div className="flex-1 overflow-auto p-3 space-y-3">
-                        {messages.filter(m => m.role !== 'system').map((m, i) => (
-                            <div key={i} className={m.role === 'user' ? 'text-right' : ''}>
-                                <div className={'inline-block rounded-xl px-3 py-2 text-sm ' + (m.role === 'user' ? 'bg-zinc-800' : 'bg-zinc-100 text-zinc-900')}>
-                                    {m.content}
+                    <div
+                        ref={messagesEndRef}
+                        className="flex-1 overflow-auto p-3 space-y-3">
+                        {messages.filter(m => m.role !== 'system').length === 0 ? (
+                            <div className="text-center text-sm text-zinc-400">
+                                {mode === 'loading' ? 'AI is loading…' : null}
+                            </div>
+                        ) : (
+                            messages.filter(m => m.role !== 'system').map((m, i) => (
+                                <div key={i} className={m.role === 'user' ? 'text-right' : ''}>
+                                    <div className={'inline-block rounded-xl px-3 py-2 text-sm ' + (m.role === 'user' ? 'bg-zinc-800' : 'bg-zinc-100 text-zinc-900')}>
+                                        {m.content}
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                        {busy && (
+                            <div className="flex items-center gap-1 text-zinc-500">
+                                <div className="flex space-x-1 bg-zinc-100 text-zinc-900 px-3 py-2 rounded-xl">
+                                    <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.2s]"></span>
+                                    <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.1s]"></span>
+                                    <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce"></span>
                                 </div>
                             </div>
-                        ))}
+                        )}
                     </div>
-
                     <div className="p-2 border-t border-zinc-800 flex gap-2">
                         <input
                             className="flex-1 rounded-lg bg-zinc-800 px-3 py-2 text-sm outline-none"
