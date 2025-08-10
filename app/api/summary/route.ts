@@ -174,25 +174,30 @@ export async function GET(req: Request) {
             `S&P 500 ${spx?.toFixed?.(0)} on ${spxDateFmt} (${spx1mPct != null ? (spx1mPct > 0 ? '+' : '') + spx1mPct + '%' : '1m n/a'}); ` +
             `EUR/USD ${eurusd?.toFixed?.(4)} (${fxDateFmt}${fxChange != null ? `, d/d ${(fxChange > 0 ? '+' : '') + fxChange}` : ''}).`
 
-        // ===== 2) ANALYSIS: deterministic sentence we control =====
-        const bondsTone = (yld1mChg == null) ? 'mixed for bonds'
-            : yld1mChg < 0 ? 'supportive for bond prices as yields fell'
-                : 'a headwind for bond prices as yields rose'
-        const equitiesTone = (spx1mPct == null) ? 'mixed for equities'
-            : spx1mPct >= 0 ? 'constructive for equities'
-                : 'soft for equities'
-        const fxTone = (fxChange == null) ? ''
-            : fxChange > 0 ? 'and a slightly weaker USD vs EUR'
-                : 'and a slightly stronger USD vs EUR'
+        // ===== 2) ANALYSIS: clearer, plain‑English sentences we control =====
+        const bondMove =
+            yld1mChg == null
+                ? 'The 10‑year Treasury yield has been relatively steady recently.'
+                : `Over roughly a month, the 10‑year Treasury yield ${yld1mChg < 0 ? 'fell' : 'rose'} about ${Math.abs(yld1mChg)} bps — when yields ${yld1mChg < 0 ? 'fall' : 'rise'}, existing bond prices typically ${yld1mChg < 0 ? 'go up' : 'go down'}.`;
+
+        const equityMove =
+            spx1mPct == null
+                ? ''
+                : `Equities ${spx1mPct >= 0 ? 'gained' : 'declined'} about ${Math.abs(spx1mPct)}% over the same period, signaling ${spx1mPct >= 0 ? 'steady' : 'softer'} risk appetite.`;
+
+        const fxExplainer =
+            fxChange == null || eurusd == null
+                ? 'For payments and FX, EUR/USD is little changed, implying limited near‑term impact on cross‑border prices.'
+                : `For payments and FX, EUR/USD is ${eurusd.toFixed(4)} today (${fxChange > 0 ? 'euro a bit stronger vs USD' : 'dollar a bit stronger vs euro'}), which can nudge cross‑border prices and card settlement costs in that direction.`;
 
         const analysisSentence =
-            `This mix suggests ${bondsTone} and ${equitiesTone}; for payments/FX, conditions point to ${fxTone || 'stable USD/EUR rates'} in the near term.`
+            `In simple terms: ${bondMove} ${equityMove} ${fxExplainer}`.replace(/\s+/g, ' ').trim();
 
-        // Deterministic 2-sentence fallback (if model unavailable)
+        // Deterministic fallback (still two sentences, but uses the same clearer language)
         const fallback =
             `In ${cpiDateFmt}, CPI inflation was ${pct(cpiYoY)} (index ${cpiIndex}); unemployment was ${unemp?.toFixed?.(1)}% in ${unempDateFmt} (${signWord(unempMoM)} ${Math.abs(unempMoM ?? 0)}pp m/m). ` +
-            `The 10‑year Treasury yield was ${yld?.toFixed?.(2)}% on ${yldDateFmt} (${yld1mChg != null ? (yld1mChg > 0 ? '+' : '') + yld1mChg + ' bps over ~1m' : '1m change n/a'}), and the S&P 500 was ${spx?.toFixed?.(0)} on ${spxDateFmt} (${spx1mPct != null ? (spx1mPct > 0 ? '+' : '') + spx1mPct + '%' : '1m change n/a'}), which is ${bondsTone}, ${equitiesTone} ${fxTone}.`
-
+            analysisSentence;
+            
         let summary = `${factLine} ${analysisSentence}`
         let source: 'model+deterministic' | 'deterministic' = 'deterministic'
 
