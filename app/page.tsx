@@ -6,6 +6,7 @@ import EcbFxCard from "./components/EcbFxCard";
 import SummaryCard from "./components/SummaryCard";
 import Yield10yCard from "./components/Yield10yCard";
 import Sp500Card from "./components/Sp500Card";
+import ChatDockServer from './components/ChatDockServer';
 
 export default function Home() {
   return (
@@ -22,6 +23,7 @@ export default function Home() {
         <Sp500Card />
       </div>
       <SummaryCard />
+      <ChatDockServer />
     </main>
   );
 }
