@@ -1,5 +1,12 @@
 // app/api/summary/route.ts
 import { NextResponse } from 'next/server'
+import {
+    getCPI,
+    getUnemployment,
+    getDGS10Window,
+    getSP500Window,
+    getEurUsdLastN,
+} from '@/app/lib/fetchers';
 
 const ENABLE_LOCAL_SUMMARY = process.env.ENABLE_LOCAL_SUMMARY === '1';
 const MODEL_TIMEOUT_MS = Number(process.env.SUMMARY_MODEL_TIMEOUT_MS || '1500');
@@ -94,37 +101,30 @@ function parseEcbEurUsd(sdmx: EcbSdmx): { value?: number; prev?: number; date?: 
 
 export async function GET(req: Request) {
     try {
-        const base = baseUrlFromEnv(req.headers)
+        // Pull data via server helpers to avoid /api/* 401s on Vercel
+        const [cpiR, blsR, dgsR, spxR, fxR] = await Promise.allSettled([
+            getCPI(),                // FredOut (CPIAUCSL ~20y)
+            getUnemployment(),       // BlsOut
+            getDGS10Window(90, 180), // FredOut DGS10 (~6m, cap 90)
+            getSP500Window(90, 180), // FredOut SP500
+            getEurUsdLastN(2),       // Obs[]: last two EUR/USD prints
+        ]);
 
-        // Keep FRED payloads small
-        const now = new Date()
-        const startMonthly = new Date(now); startMonthly.setMonth(startMonthly.getMonth() - 240) // ~20y CPI
-        const startDaily = new Date(now); startDaily.setDate(startDaily.getDate() - 180) // ~6m DGS10/SP500
-        const fmt = (d: Date) => d.toISOString().slice(0, 10)
-
-        // URLs
-        const fredCpiUrl = `${base}/api/fred?series=CPIAUCSL&limit=240&start=${fmt(startMonthly)}`
-        const blsUrl = `${base}/api/bls?series=LNS14000000&limit=24`
-        const fredDgs10Url = `${base}/api/fred?series=DGS10&limit=90&start=${fmt(startDaily)}`
-        const fredSp500Url = `${base}/api/fred?series=SP500&limit=90&start=${fmt(startDaily)}`
-        const ecbUrl = `${base}/api/ecb?flowRef=EXR&key=D.USD.EUR.SP00.A&lastNObservations=2`
-
-        const [cpiRes, blsRes, dgsRes, spxRes, ecbRes] = await Promise.all([
-            fetch(fredCpiUrl, { next: { revalidate } }),
-            fetch(blsUrl, { next: { revalidate } }),
-            fetch(fredDgs10Url, { next: { revalidate } }),
-            fetch(fredSp500Url, { next: { revalidate } }),
-            fetch(ecbUrl, { next: { revalidate } }),
-        ])
-        if (![cpiRes, blsRes, dgsRes, spxRes, ecbRes].every(r => r.ok)) {
-            throw new Error(`Upstream KPI routes failed (cpi:${cpiRes.status} bls:${blsRes.status} dgs10:${dgsRes.status} sp500:${spxRes.status} ecb:${ecbRes.status})`)
+        if (
+            ![cpiR, blsR, dgsR, spxR, fxR].every(r => r.status === 'fulfilled')
+        ) {
+            // Be resilient: if you’d rather degrade than 500, you can skip throwing here.
+            throw new Error(
+                `Upstream helpers failed ` +
+                `(cpi:${cpiR.status} bls:${blsR.status} dgs10:${dgsR.status} sp500:${spxR.status} ecb:${fxR.status})`
+            );
         }
 
-        const cpi: FredOut = await cpiRes.json()
-        const bls: BlsOut = await blsRes.json()
-        const dgs10: FredOut = await dgsRes.json()
-        const sp500: FredOut = await spxRes.json()
-        const ecbRaw: EcbSdmx = await ecbRes.json()
+        const cpi = (cpiR as PromiseFulfilledResult<FredOut>).value;
+        const bls = (blsR as PromiseFulfilledResult<BlsOut>).value;
+        const dgs10 = (dgsR as PromiseFulfilledResult<FredOut>).value;
+        const sp500 = (spxR as PromiseFulfilledResult<FredOut>).value;
+        const fxArr = (fxR as PromiseFulfilledResult<Array<{ date: string; value: number }>>).value;
 
         // CPI
         const cpiObs = cpi.observations ?? []
@@ -159,11 +159,13 @@ export async function GET(req: Request) {
             : undefined
 
         // EUR/USD
-        const fx = parseEcbEurUsd(ecbRaw)
-        const eurusd = fx.value
-        const fxPrev = fx.prev
-        const fxChange = (eurusd != null && fxPrev != null) ? Number((eurusd - fxPrev).toFixed(4)) : undefined
-        const fxDateFmt = fmtDay(fx.date)
+        const latestFx = fxArr?.[fxArr.length - 1];
+        const prevFx = fxArr?.[fxArr.length - 2];
+        const eurusd = latestFx?.value;
+        const fxChange = (eurusd != null && prevFx?.value != null)
+            ? Number((eurusd - prevFx.value).toFixed(4))
+            : undefined;
+        const fxDateFmt = fmtDay(latestFx?.date);
 
         // ===== 1) FACTS: single compact line sent to the model (no instructions) =====
         const factLine =
