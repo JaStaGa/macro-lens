@@ -1,6 +1,11 @@
 // app/components/ChatDockServer.tsx
 import {
-    getCPI, getUnemployment, getDGS10Window, getSP500Window, getEurUsdLastN, type Point,
+    getCPI,
+    getUnemployment,
+    getDGS10Window,
+    getSP500Window,
+    getEurUsdLastN,
+    type Point,
 } from '@/app/lib/fetchers';
 import ChatDock from './ChatDock';
 
@@ -19,7 +24,8 @@ function yoy(points: Point[]) {
     const a = points.at(-1)!.value, b = points.at(-13)!.value;
     return b ? ((a / b) - 1) * 100 : undefined;
 }
-function nBack<T extends { date: string; value: number }>(arr: T[], n: number) {
+type DatedVal = { date: string; value: number };
+function nBack<T extends DatedVal>(arr: T[], n: number) {
     if (arr.length === 0) return { cur: undefined as T | undefined, prev: undefined as T | undefined };
     const i = arr.length - 1;
     const j = Math.max(0, i - n);
@@ -94,7 +100,7 @@ export default async function ChatDockServer() {
         eurusd: { level: fxLatest?.value, d1d: fxChg, date: fxDate },
     };
 
-    // Stronger, compact system guidance (works for model; harmless to fallback)
+    // Stronger, compact system guidance
     const system =
         `You are MacroLens Chat, a cautious, factual assistant. ` +
         `Use the "Data snapshot" and answer in 3 short parts:\n` +

@@ -27,50 +27,45 @@ function basicAnswer(q: string, facts: DataFacts): string {
     const lvl = (n?: number) => (n == null ? 'n/a' : `${n}`);
 
     const lines: string[] = [];
-
     const pushNumbers = () => {
         lines.push(
             `3) Numbers: CPI ${pct(facts.cpi.yoy)} (${facts.cpi.date}); ` +
-            `Unemp ${pct(facts.unemployment.level)} (${facts.unemployment.date}, m/m ${facts.unemployment.mom_pp ?? 0}pp); ` +
+            `Unemp ${facts.unemployment.level?.toFixed?.(1) ?? 'n/a'}% (${facts.unemployment.date}, m/m ${facts.unemployment.mom_pp ?? 0}pp); ` +
             `10y ${facts.y10.level?.toFixed?.(2) ?? 'n/a'}% (${facts.y10.date}, ~1m ${bps(facts.y10.d1m_bps)}); ` +
             `S&P ${lvl(facts.spx.level)} (${facts.spx.date}, ~1m ${pct(facts.spx.d1m_pct)}); ` +
             `EUR/USD ${d4(facts.eurusd.level)} (${facts.eurusd.date}, d/d ${facts.eurusd.d1d != null ? (facts.eurusd.d1d > 0 ? '+' : '') + facts.eurusd.d1d.toFixed(4) : 'n/a'}).`
         );
     };
 
-    // CPI / inflation
     if (/\bcpi\b|inflation|prices? index|cost of living/.test(t)) {
         lines.push(
             `1) Takeaway: CPI year‑over‑year is ${pct(facts.cpi.yoy)} (${facts.cpi.date}). ` +
             `That means prices are ${facts.cpi.yoy && facts.cpi.yoy > 0 ? 'still rising vs. a year ago' : 'roughly flat vs. a year ago'}.`
         );
         lines.push(
-            `2) What it generally means: Softer inflation can ease pressure on interest rates over time, ` +
-            `which can support bonds; sticky or re‑accelerating inflation can do the opposite.`
+            `2) What it generally means: Softer inflation can ease pressure on interest rates over time (supports bonds); ` +
+            `sticky or re‑accelerating inflation can do the opposite.`
         );
         pushNumbers();
         return lines.join('\n');
     }
 
-    // Unemployment / labor
     if (/unemploy|labor|labour|jobs?\b|jobless|employment rate/.test(t)) {
         lines.push(
             `1) Takeaway: Unemployment is ${facts.unemployment.level?.toFixed?.(1) ?? 'n/a'}% (${facts.unemployment.date}), ` +
             `${facts.unemployment.mom_pp != null ? (facts.unemployment.mom_pp === 0 ? 'unchanged' : (facts.unemployment.mom_pp > 0 ? 'up' : 'down') + ` ${Math.abs(facts.unemployment.mom_pp).toFixed(1)}pp m/m`) : 'm/m change n/a'}.`
         );
         lines.push(
-            `2) What it generally means: A stable labor market can support consumer spending and equities; ` +
+            `2) What it generally means: A stable labor market can support spending and equities; ` +
             `a sharp weakening tends to weigh on risk appetite and can support bonds as yields fall.`
         );
         pushNumbers();
         return lines.join('\n');
     }
 
-    // Bonds / yields / rates
     if (/bond|yield|rates?|treasury|10[\s-]?year|10y/.test(t)) {
         lines.push(
-            `1) Takeaway: The 10‑year yield is ${facts.y10.level?.toFixed?.(2) ?? 'n/a'}% (${facts.y10.date}), ` +
-            `~1m change ${bps(facts.y10.d1m_bps)}.`
+            `1) Takeaway: The 10‑year yield is ${facts.y10.level?.toFixed?.(2) ?? 'n/a'}% (${facts.y10.date}), ~1m change ${bps(facts.y10.d1m_bps)}.`
         );
         lines.push(
             `2) What it generally means: Falling yields support existing bond prices; rising yields pressure them. ` +
@@ -80,11 +75,8 @@ function basicAnswer(q: string, facts: DataFacts): string {
         return lines.join('\n');
     }
 
-    // Equities
     if (/equit|stock|spx|s&p|s & p|s and p|index/.test(t)) {
-        lines.push(
-            `1) Takeaway: The S&P 500 is ${lvl(facts.spx.level)} (${facts.spx.date}), ~1m ${pct(facts.spx.d1m_pct)}.`
-        );
+        lines.push(`1) Takeaway: The S&P 500 is ${lvl(facts.spx.level)} (${facts.spx.date}), ~1m ${pct(facts.spx.d1m_pct)}.`);
         lines.push(
             `2) What it generally means: Gains usually reflect firmer risk appetite and earnings confidence; ` +
             `declines suggest caution about growth, rates, or profits.`
@@ -93,7 +85,6 @@ function basicAnswer(q: string, facts: DataFacts): string {
         return lines.join('\n');
     }
 
-    // FX / EURUSD / payments
     if (/fx\b|foreign|currency|eur\/?usd|euro|usd\b|dollar|payments?/.test(t)) {
         lines.push(
             `1) Takeaway: EUR/USD is ${d4(facts.eurusd.level)} (${facts.eurusd.date}), d/d ${facts.eurusd.d1d != null ? (facts.eurusd.d1d > 0 ? '+' : '') + facts.eurusd.d1d.toFixed(4) : 'n/a'}.`
@@ -106,7 +97,6 @@ function basicAnswer(q: string, facts: DataFacts): string {
         return lines.join('\n');
     }
 
-    // General fallback: summarize everything in plain English
     lines.push(
         `1) Takeaway: Inflation (CPI) is ${pct(facts.cpi.yoy)}; unemployment is ${facts.unemployment.level?.toFixed?.(1) ?? 'n/a'}%; ` +
         `10‑year yields are ${facts.y10.level?.toFixed?.(2) ?? 'n/a'}%; the S&P 500 is ${lvl(facts.spx.level)}; ` +
@@ -121,6 +111,8 @@ function basicAnswer(q: string, facts: DataFacts): string {
 }
 
 // ---------------------------------------------------------------
+
+type NavigatorWithGPU = Navigator & { gpu?: unknown };
 
 export default function ChatDock({
     systemPrompt,
@@ -149,7 +141,8 @@ export default function ChatDock({
         async function init() {
             if (!open || engineRef.current || !ENABLED) return;
 
-            if (!(navigator as any).gpu) {
+            const hasWebGPU = typeof (navigator as NavigatorWithGPU).gpu !== 'undefined';
+            if (!hasWebGPU) {
                 setErr('This browser/device does not support WebGPU; falling back to basic answers.');
                 setReady(true);
                 return;
@@ -197,7 +190,7 @@ export default function ChatDock({
                 { role: 'system', content: dataContext },
                 ...messages
                     .filter(m => m.role !== 'system')
-                    .map(m => ({ role: m.role, content: m.content }) as ChatMessage),
+                    .map(m => ({ role: m.role, content: m.content })),
                 { role: 'user', content: userMsg.content },
             ];
 
@@ -237,7 +230,12 @@ export default function ChatDock({
                             .filter(m => m.role !== 'system')
                             .map((m, i) => (
                                 <div key={i} className={m.role === 'user' ? 'text-right' : ''}>
-                                    <div className={'inline-block rounded-xl px-3 py-2 text-sm ' + (m.role === 'user' ? 'bg-zinc-800' : 'bg-zinc-100 text-zinc-900')}>
+                                    <div
+                                        className={
+                                            'inline-block rounded-xl px-3 py-2 text-sm ' +
+                                            (m.role === 'user' ? 'bg-zinc-800' : 'bg-zinc-100 text-zinc-900')
+                                        }
+                                    >
                                         {m.content}
                                     </div>
                                 </div>
