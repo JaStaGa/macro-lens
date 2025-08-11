@@ -70,9 +70,19 @@ export default async function Yield10yCard() {
 
     const deltaText = chgBps == null ? '1m n/a' : `${chgBps > 0 ? '+' : ''}${chgBps} bps ~1m`;
     const deltaClass =
-        chgBps == null ? 'bg-zinc-700/20 text-zinc-400' : chgBps > 0 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400';
+        chgBps == null
+            ? 'bg-zinc-700/20 text-zinc-400'
+            : chgBps > 0
+                ? 'bg-red-500/15 text-red-400' // yields ↑ = red
+                : 'bg-emerald-500/15 text-emerald-400'; // yields ↓ = green
+
     const lineColorClass =
-        chgBps == null ? 'text-zinc-400' : chgBps > 0 ? 'text-emerald-400' : 'text-red-400';
+        chgBps == null
+            ? 'text-zinc-400'
+            : chgBps > 0
+                ? 'text-red-400'
+                : 'text-emerald-400';
+
 
     return (
         <Card>
